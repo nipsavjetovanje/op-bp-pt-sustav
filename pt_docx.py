@@ -45,7 +45,13 @@ def _header_row(table, headers, widths):
         _shade_cell(cell, "1F3864")
 
 
-def render_pt_docx(pt_data: dict, output_path: str, company_name: str = "NIKOLIĆ I PARTNERI"):
+def render_pt_docx(
+    pt_data: dict,
+    output_path: str,
+    company_name: str = "NIKOLIĆ I PARTNERI",
+    trajanje_mjeseci: float | None = None,
+    sati_mjesecno: float = 169.0,
+):
     doc = Document()
     section = doc.sections[0]
     section.top_margin = Cm(2)
@@ -192,9 +198,11 @@ def render_pt_docx(pt_data: dict, output_path: str, company_name: str = "NIKOLI�
         d["sati"] += sat
         d["trosak"] += round(sat * satnica, 2)
 
-    t4 = doc.add_table(rows=1 + len(per_member) + 1, cols=3)
+    raspoloziv_sati = (trajanje_mjeseci or 0) * sati_mjesecno
+
+    t4 = doc.add_table(rows=1 + len(per_member) + 1, cols=4)
     t4.style = "Table Grid"
-    _header_row(t4, ["Član tima", "Ukupno sati", "Ukupan trošak (EUR)"], None)
+    _header_row(t4, ["Član tima", "Ukupno sati", "Ukupan trošak (EUR)", "% rada na projektu (FTE)"], None)
     i = 1
     sum_sati = 0.0
     sum_trosak = 0.0
@@ -203,6 +211,8 @@ def render_pt_docx(pt_data: dict, output_path: str, company_name: str = "NIKOLI�
         _set_cell_text(row.cells[0], ime)
         _set_cell_text(row.cells[1], _fmt_num(d["sati"]))
         _set_cell_text(row.cells[2], f"{d['trosak']:.2f}")
+        postotak = (d["sati"] / raspoloziv_sati * 100) if raspoloziv_sati > 0 else None
+        _set_cell_text(row.cells[3], f"{postotak:.1f}%" if postotak is not None else "—")
         sum_sati += d["sati"]
         sum_trosak += d["trosak"]
         i += 1
@@ -210,9 +220,18 @@ def render_pt_docx(pt_data: dict, output_path: str, company_name: str = "NIKOLI�
     _set_cell_text(total_row.cells[0], "UKUPNO", bold=True)
     _set_cell_text(total_row.cells[1], _fmt_num(sum_sati), bold=True)
     _set_cell_text(total_row.cells[2], f"{sum_trosak:.2f}", bold=True)
+    _set_cell_text(total_row.cells[3], "", bold=True)
 
     note4 = doc.add_paragraph()
-    n4run = note4.add_run("Ovaj dokument je izvor podataka za redove troška osoblja u obrascu BP i za sažetak tima u obrascu OP.")
+    note4_text = "Ovaj dokument je izvor podataka za redove troška osoblja u obrascu BP i za sažetak tima u obrascu OP."
+    if raspoloziv_sati > 0:
+        note4_text += (
+            f" % rada na projektu (FTE) računa se kao ukupno dodijeljeni sati / ({sati_mjesecno:.0f} h × "
+            f"{trajanje_mjeseci:.0f} mjeseci trajanja projekta)."
+        )
+    else:
+        note4_text += " Trajanje projekta nije uneseno — % rada na projektu nije izračunat."
+    n4run = note4.add_run(note4_text)
     n4run.italic = True
     n4run.font.size = Pt(8.5)
     n4run.font.color.rgb = GRAY

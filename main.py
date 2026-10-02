@@ -8,6 +8,7 @@ from op_generator import generate_op
 from op_docx import render_op_docx
 from bp_generator import generate_bp
 from bp_xlsx import render_bp_xlsx
+from budget_fit import uskladi_s_budzetom
 
 OUTPUTS_DIR = Path(__file__).resolve().parent.parent / "outputs"
 OUTPUTS_DIR.mkdir(exist_ok=True)
@@ -22,6 +23,7 @@ if "data" not in st.session_state:
         "ciljano_trziste": "",
         "faze_projekta": "",
         "oprema": "",
+        "trajanje_projekta_mjeseci": 0.0,
         "aktivnosti_tekst": "",
         "cv_files": [],
         "platna_lista_file": None,
@@ -44,6 +46,10 @@ with tab1:
     d["ciljano_trziste"] = st.text_area("Ciljano tržište", d["ciljano_trziste"], height=100)
     d["faze_projekta"] = st.text_area("Faze projekta (slobodan tekst, kronologija)", d["faze_projekta"], height=150)
     d["oprema"] = st.text_area("Oprema prijavitelja (postojeća)", d["oprema"], height=100)
+    d["trajanje_projekta_mjeseci"] = st.number_input(
+        "Trajanje projekta (mjeseci)", min_value=0.0, value=float(d["trajanje_projekta_mjeseci"]), step=1.0,
+        help="Iz natječaja. Koristi se za izračun % rada na projektu (FTE) po članu tima u PT obrascu.",
+    )
 
 with tab2:
     st.subheader("Popis aktivnosti (fiksan, iz natječaja)")
@@ -107,7 +113,10 @@ with tab4:
                 )
 
                 out_path = OUTPUTS_DIR / "PT_obrazac.docx"
-                summary = render_pt_docx(pt_data, str(out_path))
+                summary = render_pt_docx(
+                    pt_data, str(out_path),
+                    trajanje_mjeseci=d["trajanje_projekta_mjeseci"] or None,
+                )
 
                 st.session_state["pt_result"] = {
                     "path": str(out_path),
@@ -186,7 +195,7 @@ with tab4:
                 bp_data, bp_warnings = generate_bp(pt_result["pt_data"], ostale_stavke, up_text)
                 bp_path = OUTPUTS_DIR / "BP_obrazac.xlsx"
                 render_bp_xlsx(bp_data, str(bp_path), bp_warnings)
-                st.session_state["bp_result"] = {"path": str(bp_path), "warnings": bp_warnings}
+                st.session_state["bp_result"] = {"path": str(bp_path), "warnings": bp_warnings, "bp_data": bp_data}
             except Exception as e:
                 st.error(f"Greška pri generiranju BP-a: {e}")
 
@@ -199,6 +208,53 @@ with tab4:
                 st.caption(w)
         with open(bp_result["path"], "rb") as f:
             st.download_button("⬇ Preuzmi BP_obrazac.xlsx", f, file_name="BP_obrazac.xlsx")
+
+    st.divider()
+    st.subheader("Korak 4 — Uskladi trošak osoblja s budžetom")
+    st.caption(
+        "Proporcionalno skalira sve satove tima (satnice ostaju fiksne) tako da trošak osoblja + "
+        "neizravni troškovi stanu u max. iznos potpore iz UP-a, umanjen za sigurnosnu marginu. "
+        "Dodaje i % rada na projektu (FTE) po članu tima."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        postotak_neizravnih = st.number_input(
+            "Postotak neizravnih troškova (%)", min_value=0.0, max_value=100.0, value=15.0, step=1.0,
+        )
+    with col2:
+        margina = st.number_input("Sigurnosna margina (EUR)", min_value=0.0, value=60.0, step=10.0)
+
+    uskladi_disabled = not bp_result or not (d["trajanje_projekta_mjeseci"] or 0) > 0
+    if not bp_result:
+        st.info("Prvo generiraj BP (korak 3).")
+    elif not (d["trajanje_projekta_mjeseci"] or 0) > 0:
+        st.info("Upiši trajanje projekta (mjeseci) u Tab 1 — potrebno za izračun % rada po članu.")
+
+    if st.button("⚖️ Uskladi s budžetom", disabled=uskladi_disabled):
+        with st.spinner("Preračunavam satove i troškove..."):
+            try:
+                novi_pt, novi_bp, uskladi_warnings = uskladi_s_budzetom(
+                    pt_result["pt_data"], bp_result["bp_data"],
+                    trajanje_mjeseci=d["trajanje_projekta_mjeseci"],
+                    postotak_neizravnih=postotak_neizravnih,
+                    margina=margina,
+                )
+                pt_path = OUTPUTS_DIR / "PT_obrazac.docx"
+                pt_summary = render_pt_docx(novi_pt, str(pt_path), trajanje_mjeseci=d["trajanje_projekta_mjeseci"])
+                bp_path = OUTPUTS_DIR / "BP_obrazac.xlsx"
+                render_bp_xlsx(novi_bp, str(bp_path), uskladi_warnings)
+
+                pt_result["pt_data"] = novi_pt
+                pt_result["summary"] = pt_summary
+                pt_result["path"] = str(pt_path)
+                bp_result["bp_data"] = novi_bp
+                bp_result["warnings"] = uskladi_warnings
+                bp_result["path"] = str(bp_path)
+                st.session_state["pt_result"] = pt_result
+                st.session_state["bp_result"] = bp_result
+                st.success("Satovi i troškovi usklađeni s budžetom — PT i BP su regenerirani (preuzmi ponovno gore).")
+            except Exception as e:
+                st.error(f"Greška pri usklađivanju s budžetom: {e}")
 
 st.divider()
 st.caption("Verzija u izradi — PT, OP i BP moduli rade. Slijedi spajanje u cjelinu i Streamlit Cloud deployment.")
