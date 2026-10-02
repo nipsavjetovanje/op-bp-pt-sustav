@@ -94,7 +94,7 @@ Sastavi OP prema pravilima iz sistemskog prompta. Odgovori samo JSON-om."""
     client = _client()
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4000,
+        max_tokens=8000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
     )
@@ -102,7 +102,19 @@ Sastavi OP prema pravilima iz sistemskog prompta. Odgovori samo JSON-om."""
     if not text_block:
         raise RuntimeError("Model nije vratio tekstualni odgovor.")
 
-    op_data = _extract_json(text_block)
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            "Odgovor modela je prekinut na pola (previše teksta za zadani limit odgovora). "
+            "Pokušaj ponovno — ako se greška ponavlja, pošalji mi kraće/sažetije tekstove u upitniku."
+        )
+
+    try:
+        op_data = _extract_json(text_block)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Model nije vratio ispravan JSON (greška pri parsiranju: {e}). "
+            "Pokušaj ponovno generirati OP — ako se ponavlja, javi mi."
+        ) from e
 
     warnings = []
     generated = [_normalize_activity(a) for a in op_data.get("aktivnosti_lista", [])]

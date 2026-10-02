@@ -101,7 +101,19 @@ Sastavi PT prema pravilima iz sistemskog prompta. Odgovori samo JSON-om."""
     if not text_block:
         raise RuntimeError("Model nije vratio tekstualni odgovor (provjeri max_tokens / thinking budžet).")
 
-    pt_data = _extract_json(text_block)
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            "Odgovor modela je prekinut na pola (previše teksta za zadani limit odgovora). "
+            "Pokušaj ponovno — ako se greška ponavlja, pošalji mi kraće/sažetije CV-eve ili manje aktivnosti odjednom."
+        )
+
+    try:
+        pt_data = _extract_json(text_block)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Model nije vratio ispravan JSON (greška pri parsiranju: {e}). "
+            "Pokušaj ponovno generirati PT — ako se ponavlja, javi mi."
+        ) from e
 
     warnings = []
     quote = pt_data.get("methodology_quote", "")

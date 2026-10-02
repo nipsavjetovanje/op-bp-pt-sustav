@@ -117,7 +117,7 @@ Izvuci kategorije i klasificiraj stavke prema pravilima iz sistemskog prompta. O
     client = _client()
     response = client.messages.create(
         model=MODEL,
-        max_tokens=4000,
+        max_tokens=6000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
     )
@@ -125,7 +125,19 @@ Izvuci kategorije i klasificiraj stavke prema pravilima iz sistemskog prompta. O
     if not text_block:
         raise RuntimeError("Model nije vratio tekstualni odgovor.")
 
-    result = _extract_json(text_block)
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            "Odgovor modela je prekinut na pola (previše teksta za zadani limit odgovora). "
+            "Pokušaj ponovno — ako se greška ponavlja, pošalji mi kraći UP tekst ili manje stavki odjednom."
+        )
+
+    try:
+        result = _extract_json(text_block)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Model nije vratio ispravan JSON (greška pri parsiranju: {e}). "
+            "Pokušaj ponovno generirati BP — ako se ponavlja, javi mi."
+        ) from e
     kategorije = result.get("kategorije", [])
     max_iznos_potpore = result.get("max_iznos_potpore")
     klasifikacija = {k["stavka_id"]: k for k in result.get("klasifikacija", [])}
